@@ -85,6 +85,42 @@ def tool_git_push(commit_message: str = "chore: autonomous agent update", repo_p
         "details": commit_out
     }
 
+def tool_search_files(query: str, root_dir: str = ".") -> dict:
+    """Searches for a text query across all relevant text files in the workspace."""
+    root = Path(root_dir).resolve()
+    matches = []
+    ignored_dirs = {".git", "venv", "__pycache__", ".ruff_cache", "node_modules"}
+    
+    try:
+        for file_path in root.rglob("*"):
+            # Skip hidden files and virtual/cache environments
+            if any(part in ignored_dirs or part.startswith(".") for part in file_path.parts):
+                continue
+            if file_path.is_file():
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                    if query.lower() in content.lower():
+                        lines = content.splitlines()
+                        matching_lines = [
+                            f"Line {i+1}: {line.strip()}" 
+                            for i, line in enumerate(lines) 
+                            if query.lower() in line.lower()
+                        ]
+                        matches.append({
+                            "file": str(file_path.relative_to(root)),
+                            "matches": matching_lines[:5]  # Limit to first 5 matches per file
+                        })
+                except (UnicodeDecodeError, PermissionError):
+                    continue
+        return {
+            "status": "success",
+            "query": query,
+            "results_count": len(matches),
+            "matches": matches
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 # ==========================================
 # TOOL DISPATCH REGISTRY
 # ==========================================
@@ -93,6 +129,7 @@ AVAILABLE_TOOLS = {
     "get_telemetry": tool_get_telemetry,
     "run_ruff": tool_run_ruff,
     "git_push": tool_git_push,
+    "search_files": tool_search_files,
 }
 
 def execute_tool(tool_name: str, arguments: dict = None) -> dict:
@@ -122,11 +159,12 @@ def query_ollama(prompt: str):
         yield f"\n[Error communicating with Ollama: {e}]"
 
 def main():
-    print(f"=== Local Dev Agent v3.3 ({MODEL_NAME}) ===")
+    print(f"=== Local Dev Agent v3.4 ({MODEL_NAME}) ===")
     print("Commands:")
     print("  /telemetry - Check disk and workspace status")
     print("  /ruff      - Run ruff linter auto-fix")
-    print("  /push      - Commit and push changes to GitHub (e.g., /push update agent)")
+    print("  /push      - Commit and push changes to GitHub")
+    print("  /search    - Search codebase for a string (e.g., /search tool_git_push)")
     print("Type 'exit' to quit.\n")
     
     while True:
@@ -138,7 +176,7 @@ def main():
                 print("Exiting agent. Goodbye!")
                 break
             
-            # Direct shortcut handlers for built-in tools
+            # Shortcut handlers for built-in tools
             if user_input.startswith("/push"):
                 msg = user_input.replace("/push", "").strip() or "chore: autonomous agent update"
                 print("[Executing tool: git_push]...")
@@ -153,6 +191,15 @@ def main():
             elif user_input == "/telemetry":
                 print("[Executing tool: get_telemetry]...")
                 res = execute_tool("get_telemetry")
+                print(json.dumps(res, indent=2))
+                continue
+            elif user_input.startswith("/search"):
+                query = user_input.replace("/search", "").strip()
+                if not query:
+                    print("Usage: /search <term>")
+                    continue
+                print(f"[Executing tool: search_files for '{query}']...")
+                res = execute_tool("search_files", {"query": query})
                 print(json.dumps(res, indent=2))
                 continue
 
